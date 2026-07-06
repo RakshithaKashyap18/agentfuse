@@ -75,6 +75,14 @@ def test_kill_and_reset_endpoints() -> None:
     assert call(client).status_code == 200
 
 
+def test_status_includes_call_rate_history() -> None:
+    client = make_client([tool_use_response("q")] * 3)
+    for _ in range(3):
+        call(client)
+    cpm = client.get("/api/status").json()["calls_per_minute"]
+    assert sum(row["calls"] for row in cpm) == 3
+
+
 def test_default_identity_headers() -> None:
     client = make_client([tool_use_response("q")])
     r = client.post("/anthropic/v1/messages",

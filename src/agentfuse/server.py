@@ -91,6 +91,7 @@ def create_app(cfg: FuseConfig, upstream_client: httpx.AsyncClient | None = None
         return {"spend_by_agent": store.spend_by_agent(),
                 "runs": store.run_states(),
                 "incidents": store.recent_incidents(),
+                "calls_per_minute": store.calls_per_minute(time.time() - 600.0),
                 "killed_runs": sorted(app.state.engine.killed_runs)}
 
     @app.get("/api/stream")

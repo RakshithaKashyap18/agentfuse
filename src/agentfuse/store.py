@@ -75,6 +75,15 @@ class Store:
         return self._scalar(
             "SELECT SUM(cost_usd) FROM events WHERE agent = ? AND ts >= ?", (agent, since_ts))
 
+    def calls_per_minute(self, since_ts: float) -> list[dict[str, object]]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT CAST(ts / 60 AS INTEGER) AS minute, COUNT(*) AS calls "
+                "FROM events WHERE ts >= ? GROUP BY minute ORDER BY minute",
+                (since_ts,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     def last_block_ts(self, run: str) -> float:
         return self._scalar(
             "SELECT MAX(ts) FROM incidents WHERE run = ? AND action IN ('BLOCK', 'KILL')",
