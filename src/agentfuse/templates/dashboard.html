@@ -26,6 +26,10 @@
 </head>
 <body>
 <h1>⚡ Agent<span>Fuse</span> — live control plane</h1>
+<div id="degraded" style="display:none;background:#7f1d1d;border-radius:8px;
+     padding:.5rem 1rem;margin-bottom:1rem;">
+  ⚠ storage degraded — recent events are buffered in memory and may be incomplete
+</div>
 <div class="grid">
   <div class="card"><h3>Total spend</h3><div class="big" id="spend">$0.0000</div>
     <div id="spend-by-agent"></div></div>
@@ -36,6 +40,10 @@
   <div class="card"><h3>Incident feed</h3><ul id="incidents"></ul></div>
 </div>
 <script>
+// if the API is token-protected, open the dashboard as /?token=YOUR_TOKEN
+const TOKEN = new URLSearchParams(location.search).get("token");
+const api = (url) => url + (TOKEN ? (url.includes("?") ? "&" : "?") + "token=" + TOKEN : "");
+
 const chart = new Chart(document.getElementById("rate-chart"), {
   type: "bar",
   data: { labels: [], datasets: [{ label: "calls", data: [], backgroundColor: "#60a5fa" }] },
@@ -43,7 +51,8 @@ const chart = new Chart(document.getElementById("rate-chart"), {
 });
 
 async function refresh() {
-  const s = await (await fetch("/api/status")).json();
+  const s = await (await fetch(api("/api/status"))).json();
+  document.getElementById("degraded").style.display = s.degraded ? "block" : "none";
   // rate chart redraws from stored history, so it survives page reloads
   const entries = s.calls_per_minute.slice(-10);
   chart.data.labels = entries.map(r =>
@@ -71,9 +80,9 @@ async function refresh() {
      <b>${i.policy}</b> [${i.agent}/${i.run}] — ${i.message}</li>`).join("");
 }
 
-async function post(url) { await fetch(url, { method: "POST" }); refresh(); }
+async function post(url) { await fetch(api(url), { method: "POST" }); refresh(); }
 
-const es = new EventSource("/api/stream");
+const es = new EventSource(api("/api/stream"));
 es.onmessage = () => refresh();
 refresh();
 </script>

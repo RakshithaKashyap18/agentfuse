@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import sqlite3
 from pathlib import Path
 
 import click
@@ -48,6 +50,22 @@ def status(url: str) -> None:
     total = sum(data["spend_by_agent"].values())
     click.echo(f"total spend: ${total:.4f}")
     click.echo(f"runs: {len(data['runs'])}  incidents: {len(data['incidents'])}")
+
+
+@main.command()
+@click.option("--config", "config_path", type=click.Path(path_type=Path), default=None)
+@click.option("--db", "db_path", default=None, help="Database path (overrides config).")
+@click.option("--out", type=click.File("w"), default="-", help="Output file (default stdout).")
+def export(config_path: Path | None, db_path: str | None, out: click.utils.LazyFile) -> None:
+    """Export all metered events as JSON lines (for billing/analysis)."""
+    path = db_path or load_config(config_path).db_path
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    try:
+        for row in conn.execute("SELECT * FROM events ORDER BY ts"):
+            out.write(json.dumps(dict(row)) + "\n")
+    finally:
+        conn.close()
 
 
 @main.command()

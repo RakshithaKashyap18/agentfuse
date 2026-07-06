@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 import time
 import uuid
+from collections import defaultdict
 from importlib import resources
-from typing import Any
+from typing import Any, Callable, TypeVar
 
 import httpx
 from fastapi import FastAPI, Request, Response
@@ -15,7 +17,7 @@ from agentfuse.alerting import Alerter
 from agentfuse.config import FuseConfig
 from agentfuse.engine import PolicyEngine
 from agentfuse.meter import cost_usd
-from agentfuse.models import Action, CallEvent, PendingCall
+from agentfuse.models import Action, CallEvent, PendingCall, Verdict
 from agentfuse.parsing import build_window, parse_request, parse_response, parse_sse_response
 from agentfuse.policies import default_policies
 from agentfuse.store import Store
@@ -23,6 +25,7 @@ from agentfuse.streaming import Broadcaster
 
 log = logging.getLogger("agentfuse")
 _HOP_HEADERS = {"host", "content-length", "x-fuse-agent", "x-fuse-run"}
+T = TypeVar("T")
 
 
 def create_app(cfg: FuseConfig, upstream_client: httpx.AsyncClient | None = None) -> FastAPI:
@@ -32,10 +35,32 @@ def create_app(cfg: FuseConfig, upstream_client: httpx.AsyncClient | None = None
     app.state.engine = PolicyEngine(default_policies(cfg))
     app.state.broadcaster = Broadcaster()
     app.state.default_run = uuid.uuid4().hex[:8]
+    app.state.run_locks = defaultdict(asyncio.Lock)
+    app.state.alert_tasks = set()
     client = upstream_client or httpx.AsyncClient(
         base_url=cfg.upstream_anthropic, timeout=120.0
     )
     app.state.alerter = Alerter(cfg.webhook_url, cfg.cooldown_seconds, client)
+
+    def _authorized(request: Request) -> bool:
+        if not cfg.api_token:
+            return True
+        if request.headers.get("authorization", "") == f"Bearer {cfg.api_token}":
+            return True
+        return request.query_params.get("token") == cfg.api_token
+
+    def _unauthorized() -> JSONResponse:
+        return JSONResponse(status_code=401, content={"error": "unauthorized"})
+
+    def _fire_alert(verdict: Verdict, pending: PendingCall) -> None:
+        # fire-and-forget: a slow webhook must not add latency to agent calls
+        task = asyncio.get_running_loop().create_task(
+            app.state.alerter.maybe_fire(verdict, pending))
+        app.state.alert_tasks.add(task)
+        task.add_done_callback(app.state.alert_tasks.discard)
+
+    def _record_upstream_incident(ts: float, run: str, agent: str, message: str) -> None:
+        app.state.store.add_incident(ts, run, agent, Verdict(Action.WARN, "upstream", message))
 
     @app.post("/anthropic/v1/messages")
     async def proxy_messages(request: Request) -> Response:
@@ -49,39 +74,66 @@ def create_app(cfg: FuseConfig, upstream_client: httpx.AsyncClient | None = None
             body = {}
         model, tool_results = parse_request(body)
         pending = PendingCall(agent, run, model, started, tool_results)
-        verdict = app.state.engine.check(build_window(app.state.store, pending))
-        if verdict.action >= Action.WARN:
-            app.state.store.add_incident(started, run, agent, verdict)
-            await app.state.alerter.maybe_fire(verdict, pending)
-            await app.state.broadcaster.publish(
-                {"kind": "incident", "run": run, "agent": agent,
-                 "policy": verdict.policy, "action": verdict.action.name,
-                 "message": verdict.message})
-        if verdict.action >= Action.BLOCK:
-            headers: dict[str, str] = {}
-            if verdict.policy == "rate":
-                # seconds until the oldest call in the rolling minute ages out
-                oldest = app.state.store.oldest_call_ts_since(agent, started - 60.0)
-                wait = math.ceil(oldest + 60.0 - started) if oldest > 0 else 60
-                headers["Retry-After"] = str(min(60, max(1, wait)))
-            return JSONResponse(status_code=429, headers=headers, content={
+        # serialize check-then-record per run so parallel calls can't slip past
+        # a threshold together; the streaming relay itself happens outside the lock
+        async with app.state.run_locks[run]:
+            try:
+                verdict = app.state.engine.check(build_window(app.state.store, pending))
+            except Exception:  # store trouble must not block the call (fail-open)
+                log.exception("window build failed; allowing call (fail-open)")
+                verdict = Verdict.allow()
+            if verdict.action >= Action.WARN:
+                app.state.store.add_incident(started, run, agent, verdict)
+                _fire_alert(verdict, pending)
+                await app.state.broadcaster.publish(
+                    {"kind": "incident", "run": run, "agent": agent,
+                     "policy": verdict.policy, "action": verdict.action.name,
+                     "message": verdict.message})
+            if verdict.action >= Action.BLOCK:
+                headers: dict[str, str] = {}
+                if verdict.policy == "rate":
+                    # seconds until the oldest call in the rolling minute ages out
+                    oldest = app.state.store.oldest_call_ts_since(agent, started - 60.0)
+                    wait = math.ceil(oldest + 60.0 - started) if oldest > 0 else 60
+                    headers["Retry-After"] = str(min(60, max(1, wait)))
+                return JSONResponse(status_code=429, headers=headers, content={
+                    "type": "error",
+                    "error": {"type": "agentfuse_blocked", "message": verdict.message},
+                })
+            if body.get("stream") is not True:
+                return await _forward_and_meter(request, raw, pending)
+        return await _relay_stream(request, raw, pending)
+
+    async def _forward_and_meter(request: Request, raw: bytes,
+                                 pending: PendingCall) -> Response:
+        started = pending.ts
+        try:
+            upstream = await client.post(
+                "/v1/messages", content=raw, headers=_forward_headers(request))
+        except httpx.HTTPError as exc:
+            log.exception("upstream request failed")
+            _record_upstream_incident(started, pending.run, pending.agent,
+                                      f"upstream request failed: {exc!r}")
+            return JSONResponse(status_code=502, content={
                 "type": "error",
-                "error": {"type": "agentfuse_blocked", "message": verdict.message},
+                "error": {"type": "upstream_error",
+                          "message": "AgentFuse could not reach the upstream API."},
             })
-        if body.get("stream") is True:
-            return await _relay_stream(request, raw, pending)
-        upstream = await client.post(
-            "/v1/messages", content=raw, headers=_forward_headers(request))
+        if upstream.status_code >= 500:
+            _record_upstream_incident(started, pending.run, pending.agent,
+                                      f"upstream returned {upstream.status_code}")
         if upstream.status_code == 200:
             try:
                 tin, tout, tool_calls = parse_response(upstream.json(), cfg.loop_volatile_keys)
                 event = CallEvent(
-                    uuid.uuid4().hex, started, agent, run, model, tin, tout,
-                    cost_usd(model, tin, tout), tool_calls, tool_results,
-                    (time.time() - started) * 1000.0)
+                    uuid.uuid4().hex, started, pending.agent, pending.run, pending.model,
+                    tin, tout, cost_usd(pending.model, tin, tout), tool_calls,
+                    pending.tool_results, (time.time() - started) * 1000.0)
                 app.state.store.add_event(event)
+                if cfg.retention_days > 0:
+                    app.state.store.prune(started - cfg.retention_days * 86400.0)
                 await app.state.broadcaster.publish(
-                    {"kind": "call", "run": run, "agent": agent,
+                    {"kind": "call", "run": pending.run, "agent": pending.agent,
                      "cost_usd": event.cost_usd, "ts": event.ts})
             except Exception:
                 log.exception("metering failed; response still returned (fail-open)")
@@ -89,12 +141,25 @@ def create_app(cfg: FuseConfig, upstream_client: httpx.AsyncClient | None = None
                         media_type=upstream.headers.get("content-type"))
 
     async def _relay_stream(request: Request, raw: bytes,
-                            pending: PendingCall) -> StreamingResponse:
+                            pending: PendingCall) -> Response:
         # Forward chunks the moment they arrive (the agent must not notice us),
         # buffer a copy, and meter from the assembled body once the stream ends.
         req = client.build_request(
             "POST", "/v1/messages", content=raw, headers=_forward_headers(request))
-        upstream = await client.send(req, stream=True)
+        try:
+            upstream = await client.send(req, stream=True)
+        except httpx.HTTPError as exc:
+            log.exception("upstream stream request failed")
+            _record_upstream_incident(pending.ts, pending.run, pending.agent,
+                                      f"upstream request failed: {exc!r}")
+            return JSONResponse(status_code=502, content={
+                "type": "error",
+                "error": {"type": "upstream_error",
+                          "message": "AgentFuse could not reach the upstream API."},
+            })
+        if upstream.status_code >= 500:
+            _record_upstream_incident(pending.ts, pending.run, pending.agent,
+                                      f"upstream returned {upstream.status_code}")
 
         async def relay() -> Any:
             chunks: list[bytes] = []
@@ -115,6 +180,8 @@ def create_app(cfg: FuseConfig, upstream_client: httpx.AsyncClient | None = None
                     tool_calls, pending.tool_results,
                     (time.time() - pending.ts) * 1000.0)
                 app.state.store.add_event(event)
+                if cfg.retention_days > 0:
+                    app.state.store.prune(pending.ts - cfg.retention_days * 86400.0)
                 await app.state.broadcaster.publish(
                     {"kind": "call", "run": pending.run, "agent": pending.agent,
                      "cost_usd": event.cost_usd, "ts": event.ts})
@@ -125,28 +192,52 @@ def create_app(cfg: FuseConfig, upstream_client: httpx.AsyncClient | None = None
                                  media_type=upstream.headers.get("content-type"))
 
     @app.get("/api/status")
-    def status() -> dict[str, Any]:
+    def status(request: Request) -> Response:
+        if not _authorized(request):
+            return _unauthorized()
         store: Store = app.state.store
-        return {"spend_by_agent": store.spend_by_agent(),
-                "runs": store.run_states(),
-                "incidents": store.recent_incidents(),
-                "calls_per_minute": store.calls_per_minute(time.time() - 600.0),
-                "killed_runs": sorted(app.state.engine.killed_runs)}
+        failed = False
+
+        def safe(fn: Callable[[], T], default: T) -> T:
+            nonlocal failed
+            try:
+                return fn()
+            except Exception:
+                failed = True
+                return default
+
+        no_spend: dict[str, float] = {}
+        no_rows: list[dict[str, object]] = []
+        return JSONResponse({
+            "spend_by_agent": safe(store.spend_by_agent, no_spend),
+            "runs": safe(store.run_states, no_rows),
+            "incidents": safe(lambda: store.recent_incidents(), no_rows),
+            "calls_per_minute": safe(
+                lambda: store.calls_per_minute(time.time() - 600.0), no_rows),
+            "killed_runs": sorted(app.state.engine.killed_runs),
+            "degraded": store.degraded or failed,
+        })
 
     @app.get("/api/stream")
-    async def stream() -> StreamingResponse:
+    async def stream(request: Request) -> Response:
+        if not _authorized(request):
+            return _unauthorized()
         return StreamingResponse(app.state.broadcaster.subscribe(),
                                  media_type="text/event-stream")
 
     @app.post("/api/runs/{run}/kill")
-    def kill(run: str) -> dict[str, str]:
+    def kill(run: str, request: Request) -> Response:
+        if not _authorized(request):
+            return _unauthorized()
         app.state.engine.kill(run)
-        return {"run": run, "state": "killed"}
+        return JSONResponse({"run": run, "state": "killed"})
 
     @app.post("/api/runs/{run}/reset")
-    def reset(run: str) -> dict[str, str]:
+    def reset(run: str, request: Request) -> Response:
+        if not _authorized(request):
+            return _unauthorized()
         app.state.engine.reset(run)
-        return {"run": run, "state": "ok"}
+        return JSONResponse({"run": run, "state": "ok"})
 
     @app.get("/", response_class=HTMLResponse)
     def dashboard() -> str:

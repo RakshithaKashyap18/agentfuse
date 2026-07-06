@@ -145,10 +145,15 @@ cooldown_seconds = 600
 
 [storage]
 db_path = "./fuse.db"   # ":memory:" for ephemeral
+retention_days = 0      # 0 = keep events forever; >0 prunes older rows
+
+[server]
+api_token = ""          # if set, /api/* requires Bearer token (dashboard: /?token=...)
 ```
 
 Run with `fuse serve --config fuse.toml`. Inspect the active policies with
-`fuse policies`; check a running proxy with `fuse status`.
+`fuse policies`; check a running proxy with `fuse status`; dump all metered
+events as JSON lines with `fuse export` (for billing or analysis).
 
 ## Design decisions
 
@@ -161,7 +166,12 @@ Run with `fuse serve --config fuse.toml`. Inspect the active policies with
   `tool_use` blocks in responses, `tool_result` blocks in requests. Any framework,
   any language, zero agent-code changes.
 - **Upstream errors pass through unchanged.** AgentFuse never masks a real API
-  failure; malformed bodies are forwarded with metering skipped.
+  failure; malformed bodies are forwarded with metering skipped. Upstream 5xx
+  and connection failures are recorded as incidents so the dashboard shows
+  *why* your agent is failing.
+- **Storage can die without taking the proxy down.** If SQLite writes fail,
+  events buffer in memory, the dashboard shows a degraded banner, and calls
+  keep flowing; policy checks fail open.
 
 ## Roadmap
 
