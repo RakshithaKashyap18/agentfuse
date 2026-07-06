@@ -36,7 +36,6 @@
   <div class="card"><h3>Incident feed</h3><ul id="incidents"></ul></div>
 </div>
 <script>
-const buckets = new Map(); // minute -> call count
 const chart = new Chart(document.getElementById("rate-chart"), {
   type: "bar",
   data: { labels: [], datasets: [{ label: "calls", data: [], backgroundColor: "#60a5fa" }] },
@@ -45,6 +44,12 @@ const chart = new Chart(document.getElementById("rate-chart"), {
 
 async function refresh() {
   const s = await (await fetch("/api/status")).json();
+  // rate chart redraws from stored history, so it survives page reloads
+  const entries = s.calls_per_minute.slice(-10);
+  chart.data.labels = entries.map(r =>
+    new Date(r.minute * 60000).toISOString().slice(11, 16));
+  chart.data.datasets[0].data = entries.map(r => r.calls);
+  chart.update("none");
   const total = Object.values(s.spend_by_agent).reduce((a, b) => a + b, 0);
   document.getElementById("spend").textContent = "$" + total.toFixed(4);
   document.getElementById("spend-by-agent").innerHTML = Object.entries(s.spend_by_agent)
@@ -69,18 +74,7 @@ async function refresh() {
 async function post(url) { await fetch(url, { method: "POST" }); refresh(); }
 
 const es = new EventSource("/api/stream");
-es.onmessage = (m) => {
-  const e = JSON.parse(m.data);
-  if (e.kind === "call") {
-    const minute = new Date(e.ts * 1000).toISOString().slice(11, 16);
-    buckets.set(minute, (buckets.get(minute) || 0) + 1);
-    const entries = [...buckets.entries()].slice(-10);
-    chart.data.labels = entries.map(x => x[0]);
-    chart.data.datasets[0].data = entries.map(x => x[1]);
-    chart.update("none");
-  }
-  refresh();
-};
+es.onmessage = () => refresh();
 refresh();
 </script>
 </body>

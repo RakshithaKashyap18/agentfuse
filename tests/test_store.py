@@ -33,6 +33,18 @@ def test_incidents_recorded_and_listed() -> None:
     assert inc["policy"] == "loop" and inc["action"] == "BLOCK"
 
 
+def test_calls_per_minute_buckets_recent_events() -> None:
+    s = Store(":memory:")
+    s.add_event(ev(1, ts=60.0))
+    s.add_event(ev(2, ts=61.0))
+    s.add_event(ev(3, ts=125.0))
+    s.add_event(ev(4, ts=10.0))  # before since_ts: excluded
+    assert s.calls_per_minute(since_ts=60.0) == [
+        {"minute": 1, "calls": 2},
+        {"minute": 2, "calls": 1},
+    ]
+
+
 def test_last_block_ts_ignores_warns_and_other_runs() -> None:
     s = Store(":memory:")
     assert s.last_block_ts("r1") == 0.0
