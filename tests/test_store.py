@@ -26,6 +26,15 @@ def test_spend_and_rate_queries() -> None:
     assert s.spend_by_agent() == {"a1": 5.0}
 
 
+def test_oldest_call_ts_since() -> None:
+    s = Store(":memory:")
+    s.add_event(ev(1, ts=100.0))
+    s.add_event(ev(2, ts=160.0))
+    assert s.oldest_call_ts_since("a1", since_ts=90.0) == 100.0
+    assert s.oldest_call_ts_since("a1", since_ts=150.0) == 160.0
+    assert s.oldest_call_ts_since("a1", since_ts=999.0) == 0.0  # nothing in window
+
+
 def test_incidents_recorded_and_listed() -> None:
     s = Store(":memory:")
     s.add_incident(1.0, "r1", "a1", Verdict(Action.BLOCK, "loop", "blocked"))

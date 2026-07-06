@@ -96,6 +96,25 @@ def test_status_includes_call_rate_history() -> None:
     assert sum(row["calls"] for row in cpm) == 3
 
 
+def test_rate_block_carries_retry_after_header() -> None:
+    cfg = FuseConfig(db_path=":memory:", webhook_url="", rate_calls_per_minute=2)
+    client = make_client([tool_use_response(f"q{i}") for i in range(5)], cfg)
+    assert call(client).status_code == 200
+    assert call(client).status_code == 200
+    blocked = call(client)
+    assert blocked.status_code == 429
+    retry_after = int(blocked.headers["retry-after"])
+    assert 1 <= retry_after <= 60
+
+
+def test_non_rate_block_has_no_retry_after() -> None:
+    client = make_client([tool_use_response("q")])
+    client.post("/api/runs/r1/kill")
+    blocked = call(client)
+    assert blocked.status_code == 429
+    assert "retry-after" not in blocked.headers
+
+
 def test_default_identity_headers() -> None:
     client = make_client([tool_use_response("q")])
     r = client.post("/anthropic/v1/messages",

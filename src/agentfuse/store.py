@@ -84,6 +84,10 @@ class Store:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def oldest_call_ts_since(self, agent: str, since_ts: float) -> float:
+        return self._scalar(
+            "SELECT MIN(ts) FROM events WHERE agent = ? AND ts >= ?", (agent, since_ts))
+
     def last_block_ts(self, run: str) -> float:
         return self._scalar(
             "SELECT MAX(ts) FROM incidents WHERE run = ? AND action IN ('BLOCK', 'KILL')",

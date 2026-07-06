@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import time
 import uuid
 from importlib import resources
@@ -57,7 +58,13 @@ def create_app(cfg: FuseConfig, upstream_client: httpx.AsyncClient | None = None
                  "policy": verdict.policy, "action": verdict.action.name,
                  "message": verdict.message})
         if verdict.action >= Action.BLOCK:
-            return JSONResponse(status_code=429, content={
+            headers: dict[str, str] = {}
+            if verdict.policy == "rate":
+                # seconds until the oldest call in the rolling minute ages out
+                oldest = app.state.store.oldest_call_ts_since(agent, started - 60.0)
+                wait = math.ceil(oldest + 60.0 - started) if oldest > 0 else 60
+                headers["Retry-After"] = str(min(60, max(1, wait)))
+            return JSONResponse(status_code=429, headers=headers, content={
                 "type": "error",
                 "error": {"type": "agentfuse_blocked", "message": verdict.message},
             })
