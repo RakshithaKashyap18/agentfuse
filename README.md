@@ -66,7 +66,7 @@ meter tokens and feed the breakers — the agent notices nothing.
 
 | Breaker | Watches for | Default | Escalation |
 |---|---|---|---|
-| **Loop** | same tool called with identical arguments N times in a row | N = 4 | warn at 4, block at 6 |
+| **Loop** | same tool called with near-identical arguments N times in a row (volatile keys like timestamps and request ids are ignored, so a loop can't disguise itself) | N = 4 | warn at 4, block at 6 |
 | **Budget** | per-run and per-agent-daily dollar spend | $5 / run, $50 / agent / day | warn at 80%, block at 100% |
 | **Stall** | K consecutive `tool_result` errors | K = 5 | warn at 5, block at 8 |
 | **Rate** | LLM calls per minute per agent | 30 / min | block at cap |
@@ -130,6 +130,8 @@ per_agent_daily = 50.00
 
 [policies.loop]
 threshold = 4
+# keys ignored when comparing tool arguments
+volatile_keys = ["timestamp", "ts", "request_id", "nonce", "trace_id", "idempotency_key"]
 
 [policies.stall]
 threshold = 5

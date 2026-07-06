@@ -7,6 +7,8 @@ per_agent_daily = 50.00
 
 [policies.loop]
 threshold = 4
+# keys ignored when comparing tool arguments, so loops can't hide behind them
+volatile_keys = ["timestamp", "ts", "request_id", "nonce", "trace_id", "idempotency_key"]
 
 [policies.stall]
 threshold = 5

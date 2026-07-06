@@ -66,6 +66,19 @@ def test_loop_breaker_trips_end_to_end() -> None:
     assert any(i["policy"] == "loop" for i in incidents)
 
 
+def test_loop_breaker_ignores_volatile_args() -> None:
+    # same query every call, but a changing timestamp tries to disguise the loop
+    responses: list[dict[str, Any]] = [
+        {"content": [{"type": "tool_use", "id": "t", "name": "search",
+                      "input": {"query": "same", "timestamp": i}}],
+         "usage": {"input_tokens": 100, "output_tokens": 50}}
+        for i in range(12)
+    ]
+    client = make_client(responses)
+    codes = [call(client).status_code for _ in range(8)]
+    assert 429 in codes
+
+
 def test_kill_and_reset_endpoints() -> None:
     client = make_client([tool_use_response("q")] * 5)
     assert call(client).status_code == 200
