@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agentfuse"
-version = "0.3.1"
+version = "0.3.2"
 description = "Runtime control plane for AI agents: live cost metering and circuit breakers"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -30,9 +30,6 @@ fuse = "agentfuse.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agentfuse"]
-
-[tool.hatch.build.targets.wheel.force-include]
-"src/agentfuse/templates" = "agentfuse/templates"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
