@@ -69,7 +69,7 @@ meter tokens and feed the breakers — the agent notices nothing.
 | **Loop** | same tool called with near-identical arguments N times in a row (volatile keys like timestamps and request ids are ignored, so a loop can't disguise itself) | N = 4 | warn at 4, block at 6 |
 | **Budget** | per-run and per-agent-daily dollar spend | $5 / run, $50 / agent / day | warn at 80%, block at 100% |
 | **Stall** | K consecutive `tool_result` errors | K = 5 | warn at 5, block at 8 |
-| **Rate** | LLM calls per minute per agent | 30 / min | block at cap |
+| **Rate** | LLM calls per minute per agent | 30 / min | block at cap, with a `Retry-After` header saying exactly how long to wait |
 
 A blocked call returns HTTP 429 with a **model-readable** error body — written for the
 agent, not just the operator:
