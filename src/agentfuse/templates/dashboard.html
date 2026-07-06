@@ -1,0 +1,87 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>AgentFuse</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+  body { font-family: system-ui, sans-serif; background: #0f1117; color: #e5e7eb;
+         margin: 0; padding: 1.5rem; }
+  h1 { font-size: 1.2rem; margin: 0 0 1rem; } h1 span { color: #f59e0b; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+          gap: 1rem; }
+  .card { background: #1a1d27; border: 1px solid #2a2e3d; border-radius: 10px;
+          padding: 1rem; }
+  .big { font-size: 2.2rem; font-weight: 700; color: #34d399; }
+  table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+  td, th { padding: .35rem .5rem; text-align: left; border-bottom: 1px solid #2a2e3d; }
+  .badge { padding: .1rem .5rem; border-radius: 999px; font-size: .75rem; }
+  .OK { background: #064e3b; } .WARN { background: #78350f; }
+  .BLOCK, .KILL { background: #7f1d1d; }
+  button { background: #2a2e3d; color: #e5e7eb; border: 0; border-radius: 6px;
+           padding: .2rem .6rem; cursor: pointer; }
+  #incidents li { margin-bottom: .5rem; list-style: none; font-size: .85rem; }
+  #incidents { padding: 0; max-height: 300px; overflow-y: auto; }
+</style>
+</head>
+<body>
+<h1>⚡ Agent<span>Fuse</span> — live control plane</h1>
+<div class="grid">
+  <div class="card"><h3>Total spend</h3><div class="big" id="spend">$0.0000</div>
+    <div id="spend-by-agent"></div></div>
+  <div class="card"><h3>Calls / minute</h3><canvas id="rate-chart" height="140"></canvas></div>
+  <div class="card"><h3>Breaker board</h3><table id="runs"><thead>
+    <tr><th>run</th><th>agent</th><th>calls</th><th>spend</th><th>state</th><th></th></tr>
+    </thead><tbody></tbody></table></div>
+  <div class="card"><h3>Incident feed</h3><ul id="incidents"></ul></div>
+</div>
+<script>
+const buckets = new Map(); // minute -> call count
+const chart = new Chart(document.getElementById("rate-chart"), {
+  type: "bar",
+  data: { labels: [], datasets: [{ label: "calls", data: [], backgroundColor: "#60a5fa" }] },
+  options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } },
+});
+
+async function refresh() {
+  const s = await (await fetch("/api/status")).json();
+  const total = Object.values(s.spend_by_agent).reduce((a, b) => a + b, 0);
+  document.getElementById("spend").textContent = "$" + total.toFixed(4);
+  document.getElementById("spend-by-agent").innerHTML = Object.entries(s.spend_by_agent)
+    .map(([a, v]) => `${a}: $${v.toFixed(4)}`).join("<br>");
+  const tbody = document.querySelector("#runs tbody");
+  tbody.innerHTML = s.runs.map(r => {
+    const killed = s.killed_runs.includes(r.run);
+    const state = killed ? "KILL" : (r.last_action || "OK");
+    const action = killed
+      ? `<button onclick="post('/api/runs/${r.run}/reset')">reset</button>`
+      : `<button onclick="post('/api/runs/${r.run}/kill')">kill</button>`;
+    return `<tr><td>${r.run}</td><td>${r.agent}</td><td>${r.calls}</td>
+      <td>$${(r.spend || 0).toFixed(4)}</td>
+      <td><span class="badge ${state}">${state}</span></td><td>${action}</td></tr>`;
+  }).join("");
+  const feed = document.getElementById("incidents");
+  feed.innerHTML = s.incidents.map(i =>
+    `<li><span class="badge ${i.action}">${i.action}</span>
+     <b>${i.policy}</b> [${i.agent}/${i.run}] — ${i.message}</li>`).join("");
+}
+
+async function post(url) { await fetch(url, { method: "POST" }); refresh(); }
+
+const es = new EventSource("/api/stream");
+es.onmessage = (m) => {
+  const e = JSON.parse(m.data);
+  if (e.kind === "call") {
+    const minute = new Date(e.ts * 1000).toISOString().slice(11, 16);
+    buckets.set(minute, (buckets.get(minute) || 0) + 1);
+    const entries = [...buckets.entries()].slice(-10);
+    chart.data.labels = entries.map(x => x[0]);
+    chart.data.datasets[0].data = entries.map(x => x[1]);
+    chart.update("none");
+  }
+  refresh();
+};
+refresh();
+</script>
+</body>
+</html>
