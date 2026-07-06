@@ -1,0 +1,22 @@
+[upstream]
+anthropic = "https://api.anthropic.com"
+
+[budget]
+per_run = 5.00          # dollars; omit to disable
+per_agent_daily = 50.00
+
+[policies.loop]
+threshold = 4
+
+[policies.stall]
+threshold = 5
+
+[policies.rate]
+calls_per_minute = 30
+
+[alerting]
+webhook_url = ""        # Slack-compatible
+cooldown_seconds = 600
+
+[storage]
+db_path = "./fuse.db"   # ":memory:" for ephemeral
