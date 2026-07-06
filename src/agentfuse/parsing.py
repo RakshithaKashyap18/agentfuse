@@ -47,4 +47,5 @@ def build_window(store: Store, pending: PendingCall) -> Window:
         agent_calls_last_minute=store.agent_calls_since(pending.agent, pending.ts - 60.0),
         run_spend=store.run_spend(pending.run),
         agent_spend_today=store.agent_spend_since(pending.agent, day_start_ts(pending.ts)),
+        last_block_ts=store.last_block_ts(pending.run),
     )

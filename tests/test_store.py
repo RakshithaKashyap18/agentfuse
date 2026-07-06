@@ -31,3 +31,12 @@ def test_incidents_recorded_and_listed() -> None:
     s.add_incident(1.0, "r1", "a1", Verdict(Action.BLOCK, "loop", "blocked"))
     (inc,) = s.recent_incidents()
     assert inc["policy"] == "loop" and inc["action"] == "BLOCK"
+
+
+def test_last_block_ts_ignores_warns_and_other_runs() -> None:
+    s = Store(":memory:")
+    assert s.last_block_ts("r1") == 0.0
+    s.add_incident(1.0, "r1", "a1", Verdict(Action.WARN, "loop", "w"))
+    s.add_incident(2.0, "r1", "a1", Verdict(Action.BLOCK, "loop", "b"))
+    s.add_incident(3.0, "r2", "a1", Verdict(Action.BLOCK, "loop", "b"))
+    assert s.last_block_ts("r1") == 2.0

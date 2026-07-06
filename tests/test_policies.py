@@ -14,9 +14,10 @@ def ev(i: int, tool_calls: tuple[ToolCall, ...] = (), cost: float = 0.0,
 
 
 def win(events: tuple[CallEvent, ...] = (), pending_results: tuple[ToolResult, ...] = (),
-        rate: int = 0, run_spend: float = 0.0, agent_spend: float = 0.0) -> Window:
+        rate: int = 0, run_spend: float = 0.0, agent_spend: float = 0.0,
+        last_block_ts: float = 0.0) -> Window:
     pending = PendingCall("a1", "r1", "claude-haiku-4-5", 999.0, pending_results)
-    return Window(pending, events, rate, run_spend, agent_spend)
+    return Window(pending, events, rate, run_spend, agent_spend, last_block_ts)
 
 
 SAME = ToolCall("search", "abc123")
@@ -40,6 +41,22 @@ def test_loop_warns_at_threshold_blocks_at_plus_two() -> None:
 def test_loop_streak_resets_on_different_args() -> None:
     events = tuple(ev(i, (SAME,)) for i in range(5)) + (ev(9, (OTHER,)),)
     assert LoopBreaker(4).evaluate(win(events=events)).action is Action.ALLOW
+
+
+def test_loop_streak_resets_after_block_incident() -> None:
+    # ev(i) has ts=float(i); a block at ts 5.5 hides the six looping events
+    events = tuple(ev(i, (SAME,)) for i in range(6))
+    assert LoopBreaker(4).evaluate(win(events=events)).action is Action.BLOCK
+    assert LoopBreaker(4).evaluate(
+        win(events=events, last_block_ts=5.5)).action is Action.ALLOW
+
+
+def test_stall_streak_resets_after_block_incident() -> None:
+    err = (ToolResult(True),)
+    events = tuple(ev(i, tool_results=err) for i in range(8))
+    assert StallDetector(5).evaluate(win(events=events)).action is Action.BLOCK
+    assert StallDetector(5).evaluate(
+        win(events=events, last_block_ts=7.5)).action is Action.ALLOW
 
 
 def test_budget_warns_at_80_blocks_at_100() -> None:

@@ -55,6 +55,9 @@ class Window:
     agent_calls_last_minute: int
     run_spend: float
     agent_spend_today: float
+    # ts of this run's most recent BLOCK/KILL incident; streak-based policies only
+    # count events at/after it, so a block resets the streak and the run can heal.
+    last_block_ts: float = 0.0
 
 
 @dataclass(frozen=True)

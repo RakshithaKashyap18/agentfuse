@@ -75,6 +75,11 @@ class Store:
         return self._scalar(
             "SELECT SUM(cost_usd) FROM events WHERE agent = ? AND ts >= ?", (agent, since_ts))
 
+    def last_block_ts(self, run: str) -> float:
+        return self._scalar(
+            "SELECT MAX(ts) FROM incidents WHERE run = ? AND action IN ('BLOCK', 'KILL')",
+            (run,))
+
     def add_incident(self, ts: float, run: str, agent: str, v: Verdict) -> None:
         with self._lock:
             self._conn.execute(

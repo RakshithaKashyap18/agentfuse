@@ -10,7 +10,12 @@ class StallDetector:
         self.threshold = threshold
 
     def evaluate(self, window: Window) -> Verdict:
-        results = [tr for ev in window.events for tr in ev.tool_results]
+        results = [
+            tr
+            for ev in window.events
+            if ev.ts >= window.last_block_ts
+            for tr in ev.tool_results
+        ]
         results.extend(window.pending.tool_results)
         streak = 0
         for tr in reversed(results):

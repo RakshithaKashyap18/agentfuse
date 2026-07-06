@@ -53,12 +53,13 @@ def test_forwards_and_meters() -> None:
 
 
 def test_loop_breaker_trips_end_to_end() -> None:
-    # identical tool_use every turn -> warn at 4, block at 6
-    client = make_client([tool_use_response("same")] * 10)
-    codes = [call(client).status_code for _ in range(8)]
-    assert 429 in codes
-    blocked = next(r for r in [call(client)] if r.status_code == 429)
-    body = blocked.json()
+    # identical tool_use every turn -> warn at 4, block at 6; a block resets the
+    # streak (the run can heal), so relentless looping re-trips the breaker
+    client = make_client([tool_use_response("same")] * 20)
+    responses = [call(client) for _ in range(15)]
+    blocked = [r for r in responses if r.status_code == 429]
+    assert len(blocked) >= 2
+    body = blocked[0].json()
     assert body["type"] == "error"
     assert "search" in body["error"]["message"]  # model-readable guidance
     incidents = client.get("/api/status").json()["incidents"]

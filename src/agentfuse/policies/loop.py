@@ -10,7 +10,12 @@ class LoopBreaker:
         self.threshold = threshold
 
     def evaluate(self, window: Window) -> Verdict:
-        calls = [tc for ev in window.events for tc in ev.tool_calls]
+        calls = [
+            tc
+            for ev in window.events
+            if ev.ts >= window.last_block_ts
+            for tc in ev.tool_calls
+        ]
         if not calls:
             return Verdict.allow(self.name)
         last = calls[-1]
