@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import threading
 from typing import Any
 
 from agentfuse.models import CallEvent, ToolCall, ToolResult, Verdict
+
+log = logging.getLogger("agentfuse")
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS events (
@@ -27,21 +30,37 @@ class Store:
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._lock = threading.Lock()
+        self.degraded = False
+        self._buffer: list[tuple[str, tuple[Any, ...]]] = []
         with self._lock:
             self._conn.executescript(_SCHEMA)
             self._conn.commit()
 
-    def add_event(self, e: CallEvent) -> None:
+    def _write(self, sql: str, params: tuple[Any, ...]) -> None:
+        # a storage failure must never take down the proxy: buffer in memory,
+        # flag degraded, and flush the buffer once writes succeed again
         with self._lock:
-            self._conn.execute(
-                "INSERT INTO events VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                (e.id, e.ts, e.agent, e.run, e.model, e.input_tokens, e.output_tokens,
-                 e.cost_usd,
-                 json.dumps([[tc.name, tc.args_hash] for tc in e.tool_calls]),
-                 json.dumps([tr.is_error for tr in e.tool_results]),
-                 e.latency_ms),
-            )
-            self._conn.commit()
+            try:
+                for buf_sql, buf_params in self._buffer:
+                    self._conn.execute(buf_sql, buf_params)
+                self._buffer.clear()
+                self._conn.execute(sql, params)
+                self._conn.commit()
+                self.degraded = False
+            except sqlite3.Error:
+                log.exception("store write failed; buffering in memory")
+                self._buffer.append((sql, params))
+                self.degraded = True
+
+    def add_event(self, e: CallEvent) -> None:
+        self._write(
+            "INSERT INTO events VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (e.id, e.ts, e.agent, e.run, e.model, e.input_tokens, e.output_tokens,
+             e.cost_usd,
+             json.dumps([[tc.name, tc.args_hash] for tc in e.tool_calls]),
+             json.dumps([tr.is_error for tr in e.tool_results]),
+             e.latency_ms),
+        )
 
     def events_for_run(self, run: str) -> tuple[CallEvent, ...]:
         with self._lock:
@@ -94,13 +113,20 @@ class Store:
             (run,))
 
     def add_incident(self, ts: float, run: str, agent: str, v: Verdict) -> None:
+        self._write(
+            "INSERT INTO incidents (ts, run, agent, policy, action, message) "
+            "VALUES (?,?,?,?,?,?)",
+            (ts, run, agent, v.policy, v.action.name, v.message),
+        )
+
+    def prune(self, before_ts: float) -> None:
         with self._lock:
-            self._conn.execute(
-                "INSERT INTO incidents (ts, run, agent, policy, action, message) "
-                "VALUES (?,?,?,?,?,?)",
-                (ts, run, agent, v.policy, v.action.name, v.message),
-            )
-            self._conn.commit()
+            try:
+                self._conn.execute("DELETE FROM events WHERE ts < ?", (before_ts,))
+                self._conn.execute("DELETE FROM incidents WHERE ts < ?", (before_ts,))
+                self._conn.commit()
+            except sqlite3.Error:
+                log.exception("prune failed")
 
     def recent_incidents(self, limit: int = 50) -> list[dict[str, object]]:
         with self._lock:

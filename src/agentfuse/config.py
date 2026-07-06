@@ -22,6 +22,8 @@ class FuseConfig:
     webhook_url: str = ""
     cooldown_seconds: int = 600
     db_path: str = "./fuse.db"
+    retention_days: int = 0  # 0 = keep events forever
+    api_token: str = ""  # empty = /api/* endpoints are open
 
 
 def load_config(path: Path | None) -> FuseConfig:
@@ -33,6 +35,7 @@ def load_config(path: Path | None) -> FuseConfig:
     policies = data.get("policies", {})
     alerting = data.get("alerting", {})
     storage = data.get("storage", {})
+    server = data.get("server", {})
     return FuseConfig(
         upstream_anthropic=upstream.get("anthropic", FuseConfig.upstream_anthropic),
         budget_per_run=budget.get("per_run", FuseConfig.budget_per_run),
@@ -48,4 +51,6 @@ def load_config(path: Path | None) -> FuseConfig:
         webhook_url=alerting.get("webhook_url", FuseConfig.webhook_url),
         cooldown_seconds=alerting.get("cooldown_seconds", FuseConfig.cooldown_seconds),
         db_path=storage.get("db_path", FuseConfig.db_path),
+        retention_days=storage.get("retention_days", FuseConfig.retention_days),
+        api_token=server.get("api_token", FuseConfig.api_token),
     )

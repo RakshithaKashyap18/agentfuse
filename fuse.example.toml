@@ -22,3 +22,7 @@ cooldown_seconds = 600
 
 [storage]
 db_path = "./fuse.db"   # ":memory:" for ephemeral
+retention_days = 0      # 0 = keep events forever; >0 prunes older rows
+
+[server]
+api_token = ""          # if set, /api/* requires Bearer token (dashboard: /?token=...)
