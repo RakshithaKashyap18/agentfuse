@@ -17,3 +17,10 @@ def test_partial_toml_overrides(tmp_path: Path) -> None:
     assert cfg.budget_per_run == 2.5
     assert cfg.loop_threshold == 7
     assert cfg.rate_calls_per_minute == 30  # untouched default
+
+
+def test_loop_volatile_keys_default_and_override(tmp_path: Path) -> None:
+    assert "timestamp" in FuseConfig().loop_volatile_keys
+    p = tmp_path / "fuse.toml"
+    p.write_text('[policies.loop]\nvolatile_keys = ["session_id"]\n')
+    assert load_config(p).loop_volatile_keys == ("session_id",)

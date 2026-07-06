@@ -23,7 +23,8 @@ def parse_request(body: dict[str, Any]) -> tuple[str, tuple[ToolResult, ...]]:
     return model, tuple(results)
 
 
-def parse_response(body: dict[str, Any]) -> tuple[int, int, tuple[ToolCall, ...]]:
+def parse_response(body: dict[str, Any],
+                   volatile_keys: tuple[str, ...] = ()) -> tuple[int, int, tuple[ToolCall, ...]]:
     usage = body.get("usage", {}) if isinstance(body.get("usage"), dict) else {}
     tin = int(usage.get("input_tokens", 0))
     tout = int(usage.get("output_tokens", 0))
@@ -33,11 +34,12 @@ def parse_response(body: dict[str, Any]) -> tuple[int, int, tuple[ToolCall, ...]
         for block in content:
             if isinstance(block, dict) and block.get("type") == "tool_use":
                 calls.append(ToolCall(str(block.get("name", "")),
-                                      hash_args(block.get("input", {}))))
+                                      hash_args(block.get("input", {}), volatile_keys)))
     return tin, tout, tuple(calls)
 
 
-def parse_sse_response(text: str) -> tuple[int, int, tuple[ToolCall, ...]]:
+def parse_sse_response(text: str,
+                       volatile_keys: tuple[str, ...] = ()) -> tuple[int, int, tuple[ToolCall, ...]]:
     """Extract usage and tool calls from an Anthropic streaming (SSE) response body.
 
     input_tokens come from message_start; the final message_delta carries the
@@ -88,7 +90,7 @@ def parse_sse_response(text: str) -> tuple[int, int, tuple[ToolCall, ...]]:
                 args = json.loads(raw_args)
             except ValueError:
                 pass
-        calls.append(ToolCall(names[idx], hash_args(args)))
+        calls.append(ToolCall(names[idx], hash_args(args, volatile_keys)))
     return tin, tout, tuple(calls)
 
 

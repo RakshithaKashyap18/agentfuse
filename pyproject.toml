@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agentfuse"
-version = "0.2.0"
+version = "0.3.0"
 description = "Runtime control plane for AI agents: live cost metering and circuit breakers"
 readme = "README.md"
 requires-python = ">=3.11"

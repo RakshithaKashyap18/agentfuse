@@ -5,12 +5,18 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+DEFAULT_VOLATILE_KEYS: tuple[str, ...] = (
+    "timestamp", "ts", "request_id", "nonce", "trace_id", "idempotency_key",
+)
+
+
 @dataclass(frozen=True)
 class FuseConfig:
     upstream_anthropic: str = "https://api.anthropic.com"
     budget_per_run: float | None = 5.0
     budget_per_agent_daily: float | None = 50.0
     loop_threshold: int = 4
+    loop_volatile_keys: tuple[str, ...] = DEFAULT_VOLATILE_KEYS
     stall_threshold: int = 5
     rate_calls_per_minute: int = 30
     webhook_url: str = ""
@@ -32,6 +38,9 @@ def load_config(path: Path | None) -> FuseConfig:
         budget_per_run=budget.get("per_run", FuseConfig.budget_per_run),
         budget_per_agent_daily=budget.get("per_agent_daily", FuseConfig.budget_per_agent_daily),
         loop_threshold=policies.get("loop", {}).get("threshold", FuseConfig.loop_threshold),
+        loop_volatile_keys=tuple(
+            policies.get("loop", {}).get("volatile_keys", FuseConfig.loop_volatile_keys)
+        ),
         stall_threshold=policies.get("stall", {}).get("threshold", FuseConfig.stall_threshold),
         rate_calls_per_minute=policies.get("rate", {}).get(
             "calls_per_minute", FuseConfig.rate_calls_per_minute

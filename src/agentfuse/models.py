@@ -3,6 +3,7 @@ from __future__ import annotations
 import enum
 import hashlib
 import json
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 
@@ -71,6 +72,19 @@ class Verdict:
         return Verdict(Action.ALLOW, policy, "")
 
 
-def hash_args(args: object) -> str:
+def _drop_volatile(value: object, volatile: frozenset[str]) -> object:
+    if isinstance(value, dict):
+        return {k: _drop_volatile(v, volatile) for k, v in value.items() if k not in volatile}
+    if isinstance(value, list):
+        return [_drop_volatile(v, volatile) for v in value]
+    return value
+
+
+def hash_args(args: object, volatile_keys: Iterable[str] = ()) -> str:
+    """Hash normalized JSON args; volatile keys (timestamps, request ids, ...)
+    are dropped recursively first so a loop can't disguise itself with them."""
+    volatile = frozenset(volatile_keys)
+    if volatile:
+        args = _drop_volatile(args, volatile)
     canon = json.dumps(args, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canon.encode()).hexdigest()[:12]

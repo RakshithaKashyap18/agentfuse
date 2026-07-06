@@ -67,7 +67,7 @@ def create_app(cfg: FuseConfig, upstream_client: httpx.AsyncClient | None = None
             "/v1/messages", content=raw, headers=_forward_headers(request))
         if upstream.status_code == 200:
             try:
-                tin, tout, tool_calls = parse_response(upstream.json())
+                tin, tout, tool_calls = parse_response(upstream.json(), cfg.loop_volatile_keys)
                 event = CallEvent(
                     uuid.uuid4().hex, started, agent, run, model, tin, tout,
                     cost_usd(model, tin, tout), tool_calls, tool_results,
@@ -101,7 +101,7 @@ def create_app(cfg: FuseConfig, upstream_client: httpx.AsyncClient | None = None
                 return
             try:
                 text = b"".join(chunks).decode("utf-8", errors="replace")
-                tin, tout, tool_calls = parse_sse_response(text)
+                tin, tout, tool_calls = parse_sse_response(text, cfg.loop_volatile_keys)
                 event = CallEvent(
                     uuid.uuid4().hex, pending.ts, pending.agent, pending.run,
                     pending.model, tin, tout, cost_usd(pending.model, tin, tout),
