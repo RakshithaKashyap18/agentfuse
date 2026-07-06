@@ -58,6 +58,10 @@ header is supported):
 
 Your API key passes through to the real upstream untouched; AgentFuse never stores it.
 
+Streaming (`"stream": true`) is fully supported: response chunks are relayed to the
+agent the moment they arrive, while AgentFuse assembles its own copy of the stream to
+meter tokens and feed the breakers — the agent notices nothing.
+
 ## The four breakers
 
 | Breaker | Watches for | Default | Escalation |
@@ -166,8 +170,6 @@ The proxy position is the platform: every agent action already flows through it.
 - **Chaos testing** — inject tool failures and latency at the interception layer to
   test agent resilience before production does.
 - **OpenAI-compatible endpoint** — same breakers for `/v1/chat/completions` clients.
-- **Streaming metering** — v1 passes `"stream": true` requests through unmetered;
-  meter SSE responses as they flow.
 
 ## Development
 
