@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from agentfuse.models import PendingCall, ToolCall, ToolResult, Window, hash_args
@@ -33,6 +34,61 @@ def parse_response(body: dict[str, Any]) -> tuple[int, int, tuple[ToolCall, ...]
             if isinstance(block, dict) and block.get("type") == "tool_use":
                 calls.append(ToolCall(str(block.get("name", "")),
                                       hash_args(block.get("input", {}))))
+    return tin, tout, tuple(calls)
+
+
+def parse_sse_response(text: str) -> tuple[int, int, tuple[ToolCall, ...]]:
+    """Extract usage and tool calls from an Anthropic streaming (SSE) response body.
+
+    input_tokens come from message_start; the final message_delta carries the
+    authoritative output_tokens; tool args arrive as input_json_delta fragments
+    that must be reassembled per content-block index before hashing.
+    """
+    tin = tout = 0
+    names: dict[int, str] = {}
+    start_inputs: dict[int, Any] = {}
+    partials: dict[int, list[str]] = {}
+    for line in text.splitlines():
+        if not line.startswith("data:"):
+            continue
+        try:
+            event = json.loads(line[5:].strip())
+        except ValueError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        etype = event.get("type")
+        if etype == "message_start":
+            message = event.get("message", {})
+            usage = message.get("usage", {}) if isinstance(message, dict) else {}
+            if isinstance(usage, dict):
+                tin = int(usage.get("input_tokens", 0))
+                tout = int(usage.get("output_tokens", 0))
+        elif etype == "content_block_start":
+            block = event.get("content_block", {})
+            if isinstance(block, dict) and block.get("type") == "tool_use":
+                idx = int(event.get("index", 0))
+                names[idx] = str(block.get("name", ""))
+                start_inputs[idx] = block.get("input", {})
+        elif etype == "content_block_delta":
+            delta = event.get("delta", {})
+            if isinstance(delta, dict) and delta.get("type") == "input_json_delta":
+                partials.setdefault(int(event.get("index", 0)), []).append(
+                    str(delta.get("partial_json", "")))
+        elif etype == "message_delta":
+            usage = event.get("usage", {})
+            if isinstance(usage, dict) and "output_tokens" in usage:
+                tout = int(usage["output_tokens"])
+    calls: list[ToolCall] = []
+    for idx in sorted(names):
+        args: Any = start_inputs.get(idx, {})
+        raw_args = "".join(partials.get(idx, ()))
+        if raw_args.strip():
+            try:
+                args = json.loads(raw_args)
+            except ValueError:
+                pass
+        calls.append(ToolCall(names[idx], hash_args(args)))
     return tin, tout, tuple(calls)
 
 

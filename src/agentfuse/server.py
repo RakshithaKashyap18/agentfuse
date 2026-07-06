@@ -15,7 +15,7 @@ from agentfuse.config import FuseConfig
 from agentfuse.engine import PolicyEngine
 from agentfuse.meter import cost_usd
 from agentfuse.models import Action, CallEvent, PendingCall
-from agentfuse.parsing import build_window, parse_request, parse_response
+from agentfuse.parsing import build_window, parse_request, parse_response, parse_sse_response
 from agentfuse.policies import default_policies
 from agentfuse.store import Store
 from agentfuse.streaming import Broadcaster
@@ -46,12 +46,6 @@ def create_app(cfg: FuseConfig, upstream_client: httpx.AsyncClient | None = None
             body: dict[str, Any] = await request.json()
         except Exception:
             body = {}
-        if body.get("stream") is True:
-            log.warning("stream_passthrough: metering skipped for streaming request")
-            upstream = await client.post(
-                "/v1/messages", content=raw, headers=_forward_headers(request))
-            return Response(upstream.content, upstream.status_code,
-                            media_type=upstream.headers.get("content-type"))
         model, tool_results = parse_request(body)
         pending = PendingCall(agent, run, model, started, tool_results)
         verdict = app.state.engine.check(build_window(app.state.store, pending))
@@ -67,6 +61,8 @@ def create_app(cfg: FuseConfig, upstream_client: httpx.AsyncClient | None = None
                 "type": "error",
                 "error": {"type": "agentfuse_blocked", "message": verdict.message},
             })
+        if body.get("stream") is True:
+            return await _relay_stream(request, raw, pending)
         upstream = await client.post(
             "/v1/messages", content=raw, headers=_forward_headers(request))
         if upstream.status_code == 200:
@@ -84,6 +80,42 @@ def create_app(cfg: FuseConfig, upstream_client: httpx.AsyncClient | None = None
                 log.exception("metering failed; response still returned (fail-open)")
         return Response(upstream.content, upstream.status_code,
                         media_type=upstream.headers.get("content-type"))
+
+    async def _relay_stream(request: Request, raw: bytes,
+                            pending: PendingCall) -> StreamingResponse:
+        # Forward chunks the moment they arrive (the agent must not notice us),
+        # buffer a copy, and meter from the assembled body once the stream ends.
+        req = client.build_request(
+            "POST", "/v1/messages", content=raw, headers=_forward_headers(request))
+        upstream = await client.send(req, stream=True)
+
+        async def relay() -> Any:
+            chunks: list[bytes] = []
+            try:
+                async for chunk in upstream.aiter_raw():
+                    chunks.append(chunk)
+                    yield chunk
+            finally:
+                await upstream.aclose()
+            if upstream.status_code != 200:
+                return
+            try:
+                text = b"".join(chunks).decode("utf-8", errors="replace")
+                tin, tout, tool_calls = parse_sse_response(text)
+                event = CallEvent(
+                    uuid.uuid4().hex, pending.ts, pending.agent, pending.run,
+                    pending.model, tin, tout, cost_usd(pending.model, tin, tout),
+                    tool_calls, pending.tool_results,
+                    (time.time() - pending.ts) * 1000.0)
+                app.state.store.add_event(event)
+                await app.state.broadcaster.publish(
+                    {"kind": "call", "run": pending.run, "agent": pending.agent,
+                     "cost_usd": event.cost_usd, "ts": event.ts})
+            except Exception:
+                log.exception("stream metering failed; stream already relayed (fail-open)")
+
+        return StreamingResponse(relay(), status_code=upstream.status_code,
+                                 media_type=upstream.headers.get("content-type"))
 
     @app.get("/api/status")
     def status() -> dict[str, Any]:
