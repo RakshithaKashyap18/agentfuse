@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "agentfuse"
+name = "agentfuse1"  # PyPI distribution name; the import stays `agentfuse`
 version = "0.4.0"
 description = "Runtime control plane for AI agents: live cost metering and circuit breakers"
 readme = "README.md"
