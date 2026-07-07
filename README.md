@@ -200,4 +200,8 @@ pip install -e ".[dev]"
 ruff check src tests && mypy && pytest --cov=agentfuse
 ```
 
+A full project report — problem, architecture, complete feature inventory, release
+history, and design decisions — lives at
+[`docs/PROJECT_REPORT.md`](docs/PROJECT_REPORT.md).
+
 MIT licensed.
