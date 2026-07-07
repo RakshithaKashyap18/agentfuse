@@ -11,7 +11,8 @@ from agentfuse.policies.stall import StallDetector
 def default_policies(cfg: FuseConfig) -> list[Policy]:
     return [
         LoopBreaker(cfg.loop_threshold),
-        BudgetBreaker(cfg.budget_per_run, cfg.budget_per_agent_daily),
+        BudgetBreaker(cfg.budget_per_run, cfg.budget_per_agent_daily,
+                      dict(cfg.budget_per_agent)),
         StallDetector(cfg.stall_threshold),
         RateLimiter(cfg.rate_calls_per_minute),
     ]

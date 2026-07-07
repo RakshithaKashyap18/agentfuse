@@ -24,12 +24,22 @@ FINAL_RESPONSE: dict[str, Any] = {
 
 def make_fake_upstream() -> FastAPI:
     app = FastAPI()
-    state = {"recovered": False, "pivoted": False}
+    state = {"recovered": False, "pivoted": False, "coder_i": 0}
 
     @app.post("/v1/messages")
     async def messages(request: Request) -> dict[str, Any]:
         body = json.loads(await request.body())
-        if "agentfuse_blocked" in json.dumps(body):
+        raw = json.dumps(body)
+        if "write code" in raw:
+            # the "coder" agent: every call is expensive -> budget spiral
+            state["coder_i"] += 1
+            return {
+                "content": [{"type": "tool_use", "id": f"c{state['coder_i']}",
+                             "name": "run_tests",
+                             "input": {"attempt": state["coder_i"]}}],
+                "usage": {"input_tokens": 3000, "output_tokens": 1500},
+            }
+        if "agentfuse_blocked" in raw:
             state["recovered"] = True
         if not state["recovered"]:
             return LOOP_RESPONSE          # keeps looping until the breaker speaks

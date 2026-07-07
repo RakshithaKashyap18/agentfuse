@@ -38,6 +38,49 @@ def parse_response(body: dict[str, Any],
     return tin, tout, tuple(calls)
 
 
+def parse_openai_request(body: dict[str, Any]) -> tuple[str, tuple[ToolResult, ...]]:
+    """OpenAI chat format: each tool result is its own trailing role='tool' message.
+    The format carries no error flag, so results are recorded as non-errors."""
+    model = str(body.get("model", "unknown"))
+    messages = body.get("messages", [])
+    results: list[ToolResult] = []
+    if isinstance(messages, list):
+        for message in reversed(messages):
+            if isinstance(message, dict) and message.get("role") == "tool":
+                results.append(ToolResult(False))
+            else:
+                break
+    return model, tuple(results)
+
+
+def parse_openai_response(body: dict[str, Any],
+                          volatile_keys: tuple[str, ...] = ()
+                          ) -> tuple[int, int, tuple[ToolCall, ...]]:
+    usage = body.get("usage", {}) if isinstance(body.get("usage"), dict) else {}
+    tin = int(usage.get("prompt_tokens", 0))
+    tout = int(usage.get("completion_tokens", 0))
+    calls: list[ToolCall] = []
+    choices = body.get("choices", [])
+    message = choices[0].get("message", {}) if (
+        isinstance(choices, list) and choices and isinstance(choices[0], dict)) else {}
+    tool_calls = message.get("tool_calls", []) if isinstance(message, dict) else []
+    if isinstance(tool_calls, list):
+        for tc in tool_calls:
+            if not isinstance(tc, dict):
+                continue
+            fn = tc.get("function", {})
+            if not isinstance(fn, dict):
+                continue
+            raw_args = fn.get("arguments", "{}")
+            args: Any = raw_args
+            try:
+                args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+            except ValueError:
+                pass
+            calls.append(ToolCall(str(fn.get("name", "")), hash_args(args, volatile_keys)))
+    return tin, tout, tuple(calls)
+
+
 def parse_sse_response(text: str,
                        volatile_keys: tuple[str, ...] = ()) -> tuple[int, int, tuple[ToolCall, ...]]:
     """Extract usage and tool calls from an Anthropic streaming (SSE) response body.

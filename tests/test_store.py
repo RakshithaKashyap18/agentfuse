@@ -49,8 +49,8 @@ def test_calls_per_minute_buckets_recent_events() -> None:
     s.add_event(ev(3, ts=125.0))
     s.add_event(ev(4, ts=10.0))  # before since_ts: excluded
     assert s.calls_per_minute(since_ts=60.0) == [
-        {"minute": 1, "calls": 2},
-        {"minute": 2, "calls": 1},
+        {"minute": 1, "calls": 2, "spend": 2.0},
+        {"minute": 2, "calls": 1, "spend": 1.0},
     ]
 
 

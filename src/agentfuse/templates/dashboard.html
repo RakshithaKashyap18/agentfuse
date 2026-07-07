@@ -33,11 +33,14 @@
 <div class="grid">
   <div class="card"><h3>Total spend</h3><div class="big" id="spend">$0.0000</div>
     <div id="spend-by-agent"></div></div>
-  <div class="card"><h3>Calls / minute</h3><canvas id="rate-chart" height="140"></canvas></div>
+  <div class="card"><h3>Calls &amp; spend / minute</h3>
+    <canvas id="rate-chart" height="140"></canvas></div>
   <div class="card"><h3>Breaker board</h3><table id="runs"><thead>
     <tr><th>run</th><th>agent</th><th>calls</th><th>spend</th><th>state</th><th></th></tr>
     </thead><tbody></tbody></table></div>
-  <div class="card"><h3>Incident feed</h3><ul id="incidents"></ul></div>
+  <div class="card"><h3>Incident feed
+    <select id="agent-filter"><option value="">all agents</option></select></h3>
+    <ul id="incidents"></ul></div>
 </div>
 <script>
 // if the API is token-protected, open the dashboard as /?token=YOUR_TOKEN
@@ -46,9 +49,19 @@ const api = (url) => url + (TOKEN ? (url.includes("?") ? "&" : "?") + "token=" +
 
 const chart = new Chart(document.getElementById("rate-chart"), {
   type: "bar",
-  data: { labels: [], datasets: [{ label: "calls", data: [], backgroundColor: "#60a5fa" }] },
-  options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } },
+  data: { labels: [], datasets: [
+    { label: "calls", data: [], backgroundColor: "#60a5fa", yAxisID: "y" },
+    { label: "spend $", data: [], type: "line", borderColor: "#34d399",
+      backgroundColor: "#34d399", tension: .3, yAxisID: "y1" },
+  ]},
+  options: { plugins: { legend: { labels: { color: "#e5e7eb" } } },
+             scales: { y: { beginAtZero: true },
+                       y1: { beginAtZero: true, position: "right",
+                             grid: { drawOnChartArea: false } } } },
 });
+
+const agentFilter = document.getElementById("agent-filter");
+agentFilter.onchange = () => refresh();
 
 async function refresh() {
   const s = await (await fetch(api("/api/status"))).json();
@@ -58,6 +71,7 @@ async function refresh() {
   chart.data.labels = entries.map(r =>
     new Date(r.minute * 60000).toISOString().slice(11, 16));
   chart.data.datasets[0].data = entries.map(r => r.calls);
+  chart.data.datasets[1].data = entries.map(r => r.spend || 0);
   chart.update("none");
   const total = Object.values(s.spend_by_agent).reduce((a, b) => a + b, 0);
   document.getElementById("spend").textContent = "$" + total.toFixed(4);
@@ -74,8 +88,14 @@ async function refresh() {
       <td>$${(r.spend || 0).toFixed(4)}</td>
       <td><span class="badge ${state}">${state}</span></td><td>${action}</td></tr>`;
   }).join("");
+  const cur = agentFilter.value;
+  agentFilter.innerHTML = '<option value="">all agents</option>' +
+    Object.keys(s.spend_by_agent).map(a =>
+      `<option value="${a}"${a === cur ? " selected" : ""}>${a}</option>`).join("");
   const feed = document.getElementById("incidents");
-  feed.innerHTML = s.incidents.map(i =>
+  feed.innerHTML = s.incidents
+    .filter(i => !agentFilter.value || i.agent === agentFilter.value)
+    .map(i =>
     `<li><span class="badge ${i.action}">${i.action}</span>
      <b>${i.policy}</b> [${i.agent}/${i.run}] — ${i.message}</li>`).join("");
 }

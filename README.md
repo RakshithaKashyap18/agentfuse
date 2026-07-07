@@ -29,11 +29,12 @@ pip install agentfuse
 fuse demo
 ```
 
-`fuse demo` starts the proxy against a built-in fake upstream and drives a scripted
-"researcher" agent that walks into a retry loop. Open the dashboard it prints and
-watch: spend ticks up, the loop breaker warns, then trips, the agent receives the
-guidance message, pivots to a different tool, and finishes the job. In CI, `fuse demo
---headless` runs the same arc and exits nonzero if the breaker never trips.
+`fuse demo` starts the proxy against a built-in fake upstream and plays two acts.
+Act one: a scripted "researcher" agent walks into a retry loop — spend ticks up,
+the loop breaker warns, trips, the agent reads the guidance, pivots, and finishes
+the job. Act two: a "coder" agent burns expensive calls until the budget breaker
+warns at 80% and cuts it off at 100%. In CI, `fuse demo --headless` runs both arcs
+and exits nonzero if either breaker fails to trip.
 
 ## Quick start
 
@@ -61,6 +62,10 @@ Your API key passes through to the real upstream untouched; AgentFuse never stor
 Streaming (`"stream": true`) is fully supported: response chunks are relayed to the
 agent the moment they arrive, while AgentFuse assembles its own copy of the stream to
 meter tokens and feed the breakers — the agent notices nothing.
+
+OpenAI-based agents get the same protection: point them at
+`base_url="http://localhost:9000/openai/v1"` and calls to `chat/completions` are
+metered and breaker-checked too (OpenAI streaming passes through unmetered for now).
 
 ## The four breakers
 
@@ -155,6 +160,10 @@ Run with `fuse serve --config fuse.toml`. Inspect the active policies with
 `fuse policies`; check a running proxy with `fuse status`; dump all metered
 events as JSON lines with `fuse export` (for billing or analysis).
 
+Thresholds and budgets can be changed on a running proxy without a restart:
+`GET /api/config` shows the live values, `POST /api/config` with a JSON subset
+(e.g. `{"budget_per_run": 2.5}`) hot-swaps the policies.
+
 ## Design decisions
 
 - **Fail-open engine.** If a policy raises, the call is forwarded and the error
@@ -181,7 +190,8 @@ The proxy position is the platform: every agent action already flows through it.
   through a run.
 - **Chaos testing** — inject tool failures and latency at the interception layer to
   test agent resilience before production does.
-- **OpenAI-compatible endpoint** — same breakers for `/v1/chat/completions` clients.
+- **OpenAI streaming metering** — the OpenAI endpoint currently passes SSE through
+  unmetered, like the Anthropic endpoint did before v0.2.
 
 ## Development
 

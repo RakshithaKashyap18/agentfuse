@@ -1,7 +1,23 @@
 # Changelog
 
-## v0.3.2 (unreleased)
+## v0.4.0 (unreleased)
 
+- **OpenAI-compatible endpoint**: `/openai/v1/chat/completions` gets the same
+  metering and breakers (streaming passes through unmetered for now)
+- **Per-agent daily budgets** via `[budget.agents]`
+- **Config hot-reload**: `GET/POST /api/config` changes thresholds and budgets
+  on a running proxy
+- **API auth**: optional bearer token on `/api/*` via `[server] api_token`
+- **Upstream visibility**: 5xx and connection failures recorded as incidents;
+  unreachable upstream returns a clean 502
+- **Degraded-store fallback**: SQLite failures buffer events in memory, the
+  dashboard shows a banner, and policy checks fail open
+- **Retention + export**: `[storage] retention_days` prunes old rows;
+  `fuse export` dumps events as JSON lines
+- Webhook alerts fire in the background (no added latency on agent calls)
+- Per-run lock closes the parallel-calls threshold race
+- Dashboard: spend-per-minute line, per-agent incident filter, degraded banner
+- Demo gained a second act: a "coder" agent tripping the budget breaker
 - PyPI publish workflow via GitHub Actions trusted publishing (no stored tokens)
 - Fixed wheel build: redundant force-include duplicated the dashboard template
 - `py.typed` marker so downstream type checkers see AgentFuse's annotations
