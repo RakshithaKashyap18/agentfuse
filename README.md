@@ -25,7 +25,7 @@ AgentFuse sits in the request path and intervenes while it is happening:
 ## 60-second demo — no API key needed
 
 ```bash
-pip install agentfuse
+pip install agentfuse1
 fuse demo
 ```
 
