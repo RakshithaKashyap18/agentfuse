@@ -97,7 +97,8 @@ class Store:
     def calls_per_minute(self, since_ts: float) -> list[dict[str, object]]:
         with self._lock:
             rows = self._conn.execute(
-                "SELECT CAST(ts / 60 AS INTEGER) AS minute, COUNT(*) AS calls "
+                "SELECT CAST(ts / 60 AS INTEGER) AS minute, COUNT(*) AS calls, "
+                "SUM(cost_usd) AS spend "
                 "FROM events WHERE ts >= ? GROUP BY minute ORDER BY minute",
                 (since_ts,),
             ).fetchall()

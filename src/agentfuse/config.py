@@ -13,8 +13,10 @@ DEFAULT_VOLATILE_KEYS: tuple[str, ...] = (
 @dataclass(frozen=True)
 class FuseConfig:
     upstream_anthropic: str = "https://api.anthropic.com"
+    upstream_openai: str = "https://api.openai.com"
     budget_per_run: float | None = 5.0
     budget_per_agent_daily: float | None = 50.0
+    budget_per_agent: tuple[tuple[str, float], ...] = ()  # per-agent daily overrides
     loop_threshold: int = 4
     loop_volatile_keys: tuple[str, ...] = DEFAULT_VOLATILE_KEYS
     stall_threshold: int = 5
@@ -38,8 +40,10 @@ def load_config(path: Path | None) -> FuseConfig:
     server = data.get("server", {})
     return FuseConfig(
         upstream_anthropic=upstream.get("anthropic", FuseConfig.upstream_anthropic),
+        upstream_openai=upstream.get("openai", FuseConfig.upstream_openai),
         budget_per_run=budget.get("per_run", FuseConfig.budget_per_run),
         budget_per_agent_daily=budget.get("per_agent_daily", FuseConfig.budget_per_agent_daily),
+        budget_per_agent=tuple(sorted(budget.get("agents", {}).items())),
         loop_threshold=policies.get("loop", {}).get("threshold", FuseConfig.loop_threshold),
         loop_volatile_keys=tuple(
             policies.get("loop", {}).get("volatile_keys", FuseConfig.loop_volatile_keys)

@@ -6,14 +6,18 @@ from agentfuse.models import Action, Verdict, Window
 class BudgetBreaker:
     name = "budget"
 
-    def __init__(self, per_run: float | None, per_agent_daily: float | None) -> None:
+    def __init__(self, per_run: float | None, per_agent_daily: float | None,
+                 per_agent_overrides: dict[str, float] | None = None) -> None:
         self.per_run = per_run
         self.per_agent_daily = per_agent_daily
+        self.per_agent_overrides = per_agent_overrides or {}
 
     def evaluate(self, window: Window) -> Verdict:
+        daily_limit = self.per_agent_overrides.get(
+            window.pending.agent, self.per_agent_daily)
         checks = (
             ("run", window.run_spend, self.per_run),
-            ("agent (today)", window.agent_spend_today, self.per_agent_daily),
+            ("agent (today)", window.agent_spend_today, daily_limit),
         )
         worst = Verdict.allow(self.name)
         for scope, spent, limit in checks:

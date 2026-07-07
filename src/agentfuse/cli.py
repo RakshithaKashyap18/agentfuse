@@ -9,10 +9,10 @@ import click
 import httpx
 import uvicorn
 
-from agentfuse.config import FuseConfig, load_config
-from agentfuse.demo import run_demo_inprocess
+from agentfuse.config import load_config
+from agentfuse.demo import DEMO_CONFIG, run_demo_inprocess
 from agentfuse.demo.upstream import make_fake_upstream
-from agentfuse.demo.workload import run_workload
+from agentfuse.demo.workload import run_spend_spiral, run_workload
 from agentfuse.policies import default_policies
 from agentfuse.server import create_app
 
@@ -76,12 +76,15 @@ def demo(headless: bool, port: int) -> None:
     if headless:
         result = run_demo_inprocess()
         counts = result["counts"]
-        click.echo(f"calls ok={counts['ok']} blocked={counts['blocked']}")
+        spiral = result["spiral"]
+        click.echo(f"loop demo: ok={counts['ok']} blocked={counts['blocked']}   "
+                   f"budget spiral: ok={spiral['ok']} blocked={spiral['blocked']}")
         for i in result["incidents"]:
             click.echo(f"  [{i['action']}] {i['policy']}: {i['message'][:90]}")
-        if counts["blocked"] < 1:
-            raise click.ClickException("demo failed: breaker never tripped")
-        click.echo("demo OK: breaker tripped and agent recovered")
+        if counts["blocked"] < 1 or spiral["blocked"] < 1:
+            raise click.ClickException("demo failed: a breaker never tripped")
+        click.echo("demo OK: loop breaker healed the researcher, "
+                   "budget breaker stopped the coder")
         return
     # Live mode: real server so the dashboard is watchable while the demo runs.
     import threading
@@ -91,7 +94,7 @@ def demo(headless: bool, port: int) -> None:
     upstream_client = httpx.AsyncClient(
         transport=httpx.ASGITransport(app=make_fake_upstream()),
         base_url="https://fake-upstream")
-    app = create_app(FuseConfig(db_path=":memory:"), upstream_client=upstream_client)
+    app = create_app(DEMO_CONFIG, upstream_client=upstream_client)
     server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
     threading.Thread(target=server.run, daemon=True).start()
     time.sleep(1.0)
@@ -105,6 +108,11 @@ def demo(headless: bool, port: int) -> None:
                 counts = await run_workload(client, calls=1)
                 await asyncio.sleep(1.5)  # slow enough to watch live
                 if counts["ok"] == 0 and counts["blocked"] == 0:
+                    break
+            for _ in range(8):  # act 2: the coder's budget spiral
+                spiral = await run_spend_spiral(client, calls=1)
+                await asyncio.sleep(1.5)
+                if spiral["blocked"] > 0:
                     break
 
     asyncio.run(_drive())

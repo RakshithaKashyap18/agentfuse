@@ -1,9 +1,14 @@
 [upstream]
 anthropic = "https://api.anthropic.com"
+openai = "https://api.openai.com"
 
 [budget]
 per_run = 5.00          # dollars; omit to disable
 per_agent_daily = 50.00
+
+[budget.agents]         # per-agent daily overrides
+# researcher = 5.00
+# coder = 20.00
 
 [policies.loop]
 threshold = 4
